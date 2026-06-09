@@ -1,18 +1,32 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { getSocket } from '../lib/socket';
 import { useSocket } from '../hooks/useSocket';
+
+interface RipplePoint {
+  x: number;
+  y: number;
+  id: number;
+}
+
+const BROWSER_WIDTH = 1280;
+const BROWSER_HEIGHT = 720;
 
 export default function BrowserViewer() {
   const { browserStatus, loading } = useSocket();
   const [frameSrc, setFrameSrc] = useState<string>('');
   const [frameTime, setFrameTime] = useState<string>('');
+  const [ripples, setRipples] = useState<RipplePoint[]>([]);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const rippleCounter = useRef(0);
 
   const isRunning = browserStatus === 'running';
   const isStarting = browserStatus === 'starting' || (loading && !isRunning);
 
+  // Receive frames
   useEffect(() => {
     const socket = getSocket();
 
@@ -21,15 +35,47 @@ export default function BrowserViewer() {
       setFrameTime(new Date(data.timestamp).toLocaleTimeString());
     });
 
-    return () => {
-      socket.off('browser-frame');
-    };
+    return () => { socket.off('browser-frame'); };
   }, []);
 
+  // Clear frame on stop
   useEffect(() => {
-    if (!isRunning) {
-      setFrameSrc('');
-      setFrameTime('');
+    if (!isRunning) { setFrameSrc(''); setFrameTime(''); setRipples([]); }
+  }, [isRunning]);
+
+  // Handle click on the stream
+  const handleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isRunning || !imgRef.current) return;
+
+    // Get the actual rendered image bounds (respects object-fit: contain)
+    const rect = imgRef.current.getBoundingClientRect();
+
+    // Click position relative to the rendered image
+    const relX = e.clientX - rect.left;
+    const relY = e.clientY - rect.top;
+
+    // Ignore clicks outside the actual image area
+    if (relX < 0 || relY < 0 || relX > rect.width || relY > rect.height) return;
+
+    // Scale to browser viewport coordinates
+    const browserX = Math.round((relX / rect.width) * BROWSER_WIDTH);
+    const browserY = Math.round((relY / rect.height) * BROWSER_HEIGHT);
+
+    // Emit to backend
+    const socket = getSocket();
+    socket.emit('mouse-click', { x: browserX, y: browserY, button: 'left' });
+
+    // Show ripple at display coordinates (relative to container)
+    const containerRect = containerRef.current?.getBoundingClientRect();
+    if (containerRect) {
+      const rippleX = e.clientX - containerRect.left;
+      const rippleY = e.clientY - containerRect.top;
+      const id = rippleCounter.current++;
+
+      setRipples(prev => [...prev, { x: rippleX, y: rippleY, id }]);
+      setTimeout(() => {
+        setRipples(prev => prev.filter(r => r.id !== id));
+      }, 600);
     }
   }, [isRunning]);
 
@@ -61,19 +107,36 @@ export default function BrowserViewer() {
       </div>
 
       {/* Viewport */}
-      <div className="flex-1 relative bg-zinc-950 min-h-0 overflow-hidden">
-
+      <div
+        ref={containerRef}
+        className={`flex-1 relative bg-zinc-950 min-h-0 overflow-hidden ${isRunning && frameSrc ? 'cursor-pointer' : 'cursor-default'}`}
+        onClick={handleClick}
+      >
         {/* Live stream image */}
         {frameSrc && isRunning && (
-          <div className="absolute inset-0">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={frameSrc}
-              alt="Browser stream"
-              style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            ref={imgRef}
+            src={frameSrc}
+            alt="Browser stream"
+            style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', pointerEvents: 'none' }}
+          />
+        )}
+
+        {/* Click ripple effects */}
+        {ripples.map(ripple => (
+          <div
+            key={ripple.id}
+            className="absolute pointer-events-none"
+            style={{ left: ripple.x, top: ripple.y, transform: 'translate(-50%, -50%)' }}
+          >
+            <div className="w-6 h-6 rounded-full border-2 border-violet-400 opacity-0 animate-ping" />
+            <div
+              className="absolute inset-0 m-auto w-2 h-2 rounded-full bg-violet-400/60"
+              style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}
             />
           </div>
-        )}
+        ))}
 
         {/* Starting */}
         {isStarting && (
@@ -126,7 +189,7 @@ export default function BrowserViewer() {
       {isRunning && frameTime && (
         <div className="h-6 px-3 flex items-center justify-between bg-zinc-950 border-t border-zinc-800 shrink-0">
           <span className="text-[10px] text-zinc-600 font-mono">frame @ {frameTime}</span>
-          <span className="text-[10px] text-zinc-600">2 fps · JPEG</span>
+          <span className="text-[10px] text-zinc-600">2 fps · JPEG · click enabled</span>
         </div>
       )}
     </div>
