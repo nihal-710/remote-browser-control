@@ -13,8 +13,8 @@ interface RipplePoint {
 
 const BROWSER_WIDTH = 1280;
 const BROWSER_HEIGHT = 720;
+const SCROLL_THROTTLE_MS = 32; // ~30 scroll events/sec max
 
-// Keys that should use page.keyboard.press() instead of page.keyboard.type()
 const SPECIAL_KEYS = new Set([
   'Enter', 'Backspace', 'Tab', 'Escape', 'Delete',
   'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
@@ -22,7 +22,6 @@ const SPECIAL_KEYS = new Set([
   'F1','F2','F3','F4','F5','F6','F7','F8','F9','F10','F11','F12',
 ]);
 
-// Keys to ignore entirely (modifiers on their own etc.)
 const IGNORED_KEYS = new Set([
   'Shift', 'Control', 'Alt', 'Meta', 'CapsLock',
   'NumLock', 'ScrollLock', 'Pause', 'Insert',
@@ -35,10 +34,14 @@ export default function BrowserViewer() {
   const [frameTime, setFrameTime] = useState<string>('');
   const [ripples, setRipples] = useState<RipplePoint[]>([]);
   const [isFocused, setIsFocused] = useState(false);
+  const [isScrolling, setIsScrolling] = useState(false);
+
   const viewerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rippleCounter = useRef(0);
+  const lastScrollTime = useRef(0);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const isRunning = browserStatus === 'running';
   const isStarting = browserStatus === 'starting' || (loading && !isRunning);
@@ -60,32 +63,50 @@ export default function BrowserViewer() {
       setFrameTime('');
       setRipples([]);
       setIsFocused(false);
+      setIsScrolling(false);
     }
+  }, [isRunning]);
+
+  // ── Scroll handler ──────────────────────────────────────────
+  const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    if (!isRunning) return;
+
+    // Prevent dashboard from scrolling
+    e.preventDefault();
+    e.stopPropagation();
+
+    const now = Date.now();
+    if (now - lastScrollTime.current < SCROLL_THROTTLE_MS) return;
+    lastScrollTime.current = now;
+
+    const socket = getSocket();
+    socket.emit('mouse-scroll', {
+      deltaX: Math.round(e.deltaX),
+      deltaY: Math.round(e.deltaY),
+    });
+
+    // Show scrolling indicator briefly
+    setIsScrolling(true);
+    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    scrollTimeoutRef.current = setTimeout(() => setIsScrolling(false), 500);
   }, [isRunning]);
 
   // ── Keyboard handler ────────────────────────────────────────
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
     if (!isRunning) return;
-
-    // Always prevent default to stop browser scroll/shortcuts
     e.preventDefault();
-
     if (IGNORED_KEYS.has(e.key)) return;
 
     const socket = getSocket();
 
-    // Handle Ctrl+key shortcuts
     if (e.ctrlKey && !IGNORED_KEYS.has(e.key)) {
-      const key = `Control+${e.key.toUpperCase()}`;
-      socket.emit('keyboard-input', { key });
+      socket.emit('keyboard-input', { key: `Control+${e.key.toUpperCase()}` });
       return;
     }
 
     if (SPECIAL_KEYS.has(e.key)) {
-      // Special key: use press()
       socket.emit('keyboard-input', { key: e.key });
     } else if (e.key.length === 1) {
-      // Printable character: use type()
       socket.emit('keyboard-input', { text: e.key });
     }
   }, [isRunning]);
@@ -94,7 +115,6 @@ export default function BrowserViewer() {
   const handleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (!isRunning || !imgRef.current) return;
 
-    // Focus the viewer for keyboard capture
     viewerRef.current?.focus();
 
     const rect = imgRef.current.getBoundingClientRect();
@@ -108,7 +128,6 @@ export default function BrowserViewer() {
 
     getSocket().emit('mouse-click', { x: browserX, y: browserY, button: 'left' });
 
-    // Ripple
     const containerRect = containerRef.current?.getBoundingClientRect();
     if (containerRect) {
       const id = rippleCounter.current++;
@@ -121,6 +140,13 @@ export default function BrowserViewer() {
     }
   }, [isRunning]);
 
+  // Cleanup scroll timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    };
+  }, []);
+
   return (
     <div className="flex flex-col bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden h-full">
 
@@ -131,6 +157,7 @@ export default function BrowserViewer() {
           <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/50" />
           <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/50" />
         </div>
+
         <div className="flex-1 mx-2 h-5 rounded bg-zinc-800 border border-zinc-700 flex items-center px-2 gap-1.5">
           <svg className="w-2.5 h-2.5 text-zinc-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="10"/>
@@ -140,9 +167,20 @@ export default function BrowserViewer() {
             {isRunning ? 'chromium — live stream' : 'about:blank'}
           </span>
         </div>
+
         <div className="flex items-center gap-2 shrink-0">
-          {/* Keyboard focus indicator */}
-          {isRunning && isFocused && (
+          {/* Scroll indicator */}
+          {isRunning && isScrolling && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/15 border border-blue-500/30">
+              <svg className="w-2.5 h-2.5 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 5v14M19 12l-7 7-7-7"/>
+              </svg>
+              <span className="text-[10px] text-blue-400 font-medium">Scroll</span>
+            </span>
+          )}
+
+          {/* Keyboard indicator */}
+          {isRunning && isFocused && !isScrolling && (
             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-violet-500/15 border border-violet-500/30">
               <svg className="w-2.5 h-2.5 text-violet-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="2" y="4" width="20" height="16" rx="2"/>
@@ -151,6 +189,8 @@ export default function BrowserViewer() {
               <span className="text-[10px] text-violet-400 font-medium">KB Active</span>
             </span>
           )}
+
+          {/* Live badge */}
           {isRunning && (
             <div className="flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -160,19 +200,19 @@ export default function BrowserViewer() {
         </div>
       </div>
 
-      {/* Viewport — focusable div captures keyboard */}
+      {/* Viewport */}
       <div
         ref={viewerRef}
         tabIndex={isRunning ? 0 : -1}
         onKeyDown={handleKeyDown}
         onFocus={() => setIsFocused(true)}
         onBlur={() => setIsFocused(false)}
+        onWheel={handleWheel}
         className={`flex-1 relative bg-zinc-950 min-h-0 overflow-hidden outline-none
           ${isRunning && frameSrc ? 'cursor-pointer' : 'cursor-default'}
           ${isFocused && isRunning ? 'ring-1 ring-inset ring-violet-500/40' : ''}
         `}
       >
-        {/* Inner container for click coordinate reference */}
         <div ref={containerRef} className="absolute inset-0" onClick={handleClick}>
 
           {/* Live stream */}
@@ -200,8 +240,10 @@ export default function BrowserViewer() {
               style={{ left: r.x, top: r.y, transform: 'translate(-50%, -50%)' }}
             >
               <div className="w-6 h-6 rounded-full border-2 border-violet-400 animate-ping opacity-75" />
-              <div className="absolute w-2 h-2 rounded-full bg-violet-400/70"
-                style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }} />
+              <div
+                className="absolute w-2 h-2 rounded-full bg-violet-400/70"
+                style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}
+              />
             </div>
           ))}
         </div>
@@ -258,7 +300,7 @@ export default function BrowserViewer() {
         <div className="h-6 px-3 flex items-center justify-between bg-zinc-950 border-t border-zinc-800 shrink-0">
           <span className="text-[10px] text-zinc-600 font-mono">frame @ {frameTime}</span>
           <span className="text-[10px] text-zinc-600">
-            {isFocused ? '⌨ keyboard active · ' : ''}2 fps · JPEG
+            {isScrolling ? '↕ scrolling · ' : isFocused ? '⌨ kb active · ' : ''}2 fps · JPEG
           </span>
         </div>
       )}
