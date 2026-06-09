@@ -13,6 +13,8 @@ class BrowserManager {
   private streamInterval: NodeJS.Timeout | null = null;
   private frameCallback: FrameCallback | null = null;
   private isCapturing = false;
+  private captureCount = 0;
+  private emitCount = 0;
 
   private state: BrowserState = {
     status: 'idle',
@@ -68,6 +70,7 @@ class BrowserManager {
       this.page.on('framenavigated', (frame) => {
         if (frame === this.page?.mainFrame()) {
           this.state.currentUrl = frame.url();
+          logger.info('[STREAM] framenavigated', { url: this.state.currentUrl });
         }
       });
 
@@ -105,6 +108,8 @@ class BrowserManager {
       if (this.browser) { await this.browser.close(); this.browser = null; }
 
       this.state = { status: 'idle', currentUrl: '', startedAt: null, error: null };
+      this.captureCount = 0;
+      this.emitCount = 0;
       logger.info('Browser stopped successfully');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -116,24 +121,31 @@ class BrowserManager {
   }
 
   startStreaming(callback: FrameCallback): void {
+    // Always clear any existing interval before starting
     if (this.streamInterval) {
-      logger.warn('Streaming already active');
-      return;
+      clearInterval(this.streamInterval);
+      this.streamInterval = null;
+      logger.info('[STREAM] Cleared existing interval before restart');
     }
 
     if (!this.page) {
-      logger.error('Cannot start streaming: no page available');
+      logger.error('[STREAM] Cannot start streaming: no page available');
       return;
     }
 
     this.frameCallback = callback;
     this.isCapturing = false;
-    logger.info('Starting screenshot stream...');
+    logger.info('[STREAM] Starting screenshot stream...');
 
     this.streamInterval = setInterval(async () => {
-      if (this.isCapturing || !this.page || !this.frameCallback) return;
+      if (this.isCapturing || !this.page || !this.frameCallback) {
+        if (!this.page) logger.warn('[STREAM] Skipping: no page');
+        return;
+      }
 
       this.isCapturing = true;
+      this.captureCount++;
+
       try {
         const buffer = await this.page.screenshot({
           type: 'jpeg',
@@ -141,10 +153,15 @@ class BrowserManager {
           fullPage: false,
         });
 
+        this.emitCount++;
+        if (this.emitCount % 30 === 0) {
+          logger.info(`[STREAM] Stats: captured=${this.captureCount} emitted=${this.emitCount} url=${this.page?.url()}`);
+        }
+
         const image = `data:image/jpeg;base64,${buffer.toString('base64')}`;
         this.frameCallback({ image, timestamp: Date.now() });
       } catch (error) {
-        logger.error('Screenshot capture failed', { error });
+        logger.error('[STREAM] Screenshot capture failed', { error });
       } finally {
         this.isCapturing = false;
       }
@@ -155,10 +172,27 @@ class BrowserManager {
     if (this.streamInterval) {
       clearInterval(this.streamInterval);
       this.streamInterval = null;
-      this.frameCallback = null;
       this.isCapturing = false;
-      logger.info('Screenshot stream stopped');
+      logger.info('[STREAM] Screenshot stream stopped');
     }
+    // Do NOT null frameCallback here — restartStreaming needs it
+  }
+
+  // Call this after every navigation event
+  restartStreaming(): void {
+    if (!this.frameCallback) {
+      logger.warn('[STREAM] restartStreaming called but no frameCallback registered');
+      return;
+    }
+    logger.info('[STREAM] Restarting stream after navigation...');
+    const cb = this.frameCallback;
+    this.stopStreaming();
+    // 300ms allows the new page to paint before we start capturing
+    setTimeout(() => {
+      if (this.state.status === 'running') {
+        this.startStreaming(cb);
+      }
+    }, 300);
   }
 
   getPage(): Page | null { return this.page; }

@@ -1,90 +1,206 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useSocket } from '../hooks/useSocket';
 
+function extractDomain(url: string): string {
+  try {
+    return new URL(url).hostname.replace('www.', '');
+  } catch {
+    return url;
+  }
+}
+
 export default function BrowserControls() {
-  const { browserStatus, socketStatus, loading, currentUrl, startBrowser, stopBrowser, navigateTo, goBack, goForward, refresh } = useSocket();
+  const {
+    browserStatus, socketStatus, loading,
+    currentUrl, pageTitle, isNavigating,
+    startBrowser, stopBrowser, navigateTo, goBack, goForward, refresh,
+  } = useSocket();
+
   const [urlInput, setUrlInput] = useState('');
+  const [urlError, setUrlError] = useState('');
 
   const isRunning = browserStatus === 'running';
   const isIdle = browserStatus === 'idle';
   const isConnected = socketStatus === 'connected';
   const isBusy = loading || browserStatus === 'starting' || browserStatus === 'stopping';
 
+  // Sync url input placeholder when currentUrl changes
+  useEffect(() => {
+    setUrlError('');
+  }, [currentUrl]);
+
   function handleNavigate(e: React.FormEvent) {
     e.preventDefault();
-    if (urlInput.trim()) { navigateTo(urlInput.trim()); setUrlInput(''); }
+    const raw = urlInput.trim();
+    if (!raw) return;
+
+    setUrlError('');
+
+    // Auto-prepend https:// if missing
+    let url = raw;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = `https://${url}`;
+    }
+
+    // Basic validation
+    try {
+      new URL(url);
+    } catch {
+      setUrlError('Invalid URL');
+      return;
+    }
+
+    navigateTo(url);
+    setUrlInput('');
   }
 
   return (
-    <div className="space-y-3">
-      <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-4">
-        <p className="text-xs font-medium text-zinc-500 uppercase tracking-widest mb-3">Session</p>
-        <div className="grid grid-cols-2 gap-2">
-          <button onClick={startBrowser} disabled={!isIdle || !isConnected || isBusy}
-            className="flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all
-              bg-violet-600 hover:bg-violet-500 text-white shadow-lg shadow-violet-500/20
-              disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none">
-            {isBusy && !isRunning
-              ? <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-              : <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" /></svg>
-            }
+    <div className="flex flex-col gap-3">
+
+      {/* Session Card */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
+        <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest mb-2.5">Session</p>
+        <div className="flex gap-2">
+          <button
+            onClick={startBrowser}
+            disabled={!isIdle || !isConnected || isBusy}
+            className="flex-1 flex items-center justify-center gap-1.5 h-8 rounded-md text-xs font-medium bg-violet-600 hover:bg-violet-500 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {isBusy && !isRunning ? (
+              <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"/>
+                <path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" fill="currentColor" className="opacity-75"/>
+              </svg>
+            ) : (
+              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="5,3 19,12 5,21"/>
+              </svg>
+            )}
             Start
           </button>
-          <button onClick={stopBrowser} disabled={!isRunning || isBusy}
-            className="flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all
-              bg-white/[0.05] hover:bg-white/[0.08] text-zinc-300 border border-white/[0.08]
-              disabled:opacity-40 disabled:cursor-not-allowed">
-            {isBusy && isRunning
-              ? <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-              : <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 7.5A2.25 2.25 0 017.5 5.25h9a2.25 2.25 0 012.25 2.25v9a2.25 2.25 0 01-2.25 2.25h-9a2.25 2.25 0 01-2.25-2.25v-9z" /></svg>
-            }
+          <button
+            onClick={stopBrowser}
+            disabled={!isRunning || isBusy}
+            className="flex-1 flex items-center justify-center gap-1.5 h-8 rounded-md text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {isBusy && isRunning ? (
+              <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"/>
+                <path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" fill="currentColor" className="opacity-75"/>
+              </svg>
+            ) : (
+              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+              </svg>
+            )}
             Stop
           </button>
         </div>
       </div>
 
-      <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-4">
-        <p className="text-xs font-medium text-zinc-500 uppercase tracking-widest mb-3">Navigation</p>
-        <div className="flex gap-1.5 mb-3">
+      {/* Navigation Card */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
+        <div className="flex items-center justify-between mb-2.5">
+          <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest">Navigation</p>
+          {isNavigating && (
+            <span className="flex items-center gap-1 text-[10px] text-yellow-400">
+              <svg className="w-2.5 h-2.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"/>
+                <path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" fill="currentColor" className="opacity-75"/>
+              </svg>
+              Loading...
+            </span>
+          )}
+        </div>
+
+        {/* Back / Forward / Refresh */}
+        <div className="flex gap-1.5 mb-2.5">
           {[
-            { action: goBack, title: 'Back', d: 'M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18' },
-            { action: goForward, title: 'Forward', d: 'M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3' },
-            { action: refresh, title: 'Refresh', d: 'M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99' },
-          ].map(({ action, title, d }) => (
-            <button key={title} onClick={action} disabled={!isRunning} title={title}
-              className="flex-1 flex items-center justify-center rounded-lg p-2 text-zinc-400
-                bg-white/[0.03] hover:bg-white/[0.07] border border-white/[0.06]
-                disabled:opacity-30 disabled:cursor-not-allowed transition-all">
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d={d} />
+            { fn: goBack,    title: 'Back',    d: 'M19 12H5M12 5l-7 7 7 7' },
+            { fn: goForward, title: 'Forward', d: 'M5 12h14M12 5l7 7-7 7' },
+            { fn: refresh,   title: 'Refresh', d: 'M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15' },
+          ].map(({ fn, title, d }) => (
+            <button
+              key={title}
+              onClick={fn}
+              disabled={!isRunning || isNavigating}
+              title={title}
+              className="flex-1 flex items-center justify-center h-7 rounded-md bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d={d}/>
               </svg>
             </button>
           ))}
         </div>
-        <form onSubmit={handleNavigate} className="flex gap-2">
+
+        {/* URL Input */}
+        <form onSubmit={handleNavigate} className="flex gap-1.5">
           <div className="relative flex-1">
-            <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center">
-              <svg className="h-3.5 w-3.5 text-zinc-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253" />
-              </svg>
-            </div>
-            <input type="text" value={urlInput} onChange={(e) => setUrlInput(e.target.value)}
-              placeholder={isRunning ? (currentUrl || 'Enter URL...') : 'Start browser first'}
-              disabled={!isRunning}
-              className="w-full rounded-lg bg-white/[0.04] border border-white/[0.08] pl-9 pr-3 py-2 text-xs text-zinc-200 placeholder-zinc-600
-                focus:outline-none focus:ring-1 focus:ring-violet-500/50 focus:border-violet-500/50
-                disabled:opacity-40 disabled:cursor-not-allowed transition-all" />
+            {isNavigating ? (
+              <div className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center">
+                <svg className="w-3 h-3 text-yellow-500 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"/>
+                  <path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" fill="currentColor" className="opacity-75"/>
+                </svg>
+              </div>
+            ) : (
+              <div className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center">
+                <svg className="w-3 h-3 text-zinc-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10"/>
+                  <path d="M2 12h20M12 2a15.3 15.3 0 010 20M12 2a15.3 15.3 0 000 20"/>
+                </svg>
+              </div>
+            )}
+            <input
+              type="text"
+              value={urlInput}
+              onChange={(e) => { setUrlInput(e.target.value); setUrlError(''); }}
+              placeholder={isRunning ? (currentUrl || 'https://...') : 'Start browser first'}
+              disabled={!isRunning || isNavigating}
+              className={`w-full h-7 pl-7 pr-2 rounded-md bg-zinc-800 border text-xs text-zinc-200 placeholder-zinc-600
+                focus:outline-none focus:ring-1 focus:ring-violet-500 focus:border-violet-500
+                disabled:opacity-40 disabled:cursor-not-allowed transition-all
+                ${urlError ? 'border-red-500/50' : 'border-zinc-700'}`}
+            />
           </div>
-          <button type="submit" disabled={!isRunning || !urlInput.trim()}
-            className="rounded-lg px-3 py-2 text-xs font-medium bg-violet-600/80 hover:bg-violet-600 text-white
-              disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+          <button
+            type="submit"
+            disabled={!isRunning || !urlInput.trim() || isNavigating}
+            className="h-7 px-3 rounded-md text-xs font-medium bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
             Go
           </button>
         </form>
+        {urlError && (
+          <p className="mt-1.5 text-[10px] text-red-400">{urlError}</p>
+        )}
       </div>
+
+      {/* Current Page Info Card */}
+      {isRunning && (currentUrl || pageTitle) && (
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
+          <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">Current Page</p>
+          {pageTitle && (
+            <p className="text-xs text-zinc-300 font-medium truncate mb-1" title={pageTitle}>
+              {pageTitle}
+            </p>
+          )}
+          {currentUrl && (
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center shrink-0">
+                <div className="w-1 h-1 rounded-full bg-emerald-400" />
+              </div>
+              <p className="text-[10px] text-zinc-500 font-mono truncate" title={currentUrl}>
+                {extractDomain(currentUrl)}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

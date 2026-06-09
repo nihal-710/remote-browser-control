@@ -142,10 +142,21 @@ export default function BrowserViewer() {
 
   // Cleanup scroll timeout on unmount
   useEffect(() => {
-    return () => {
-      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
-    };
-  }, []);
+  const socket = getSocket();
+
+  const handleFrame = (data: { image: string; timestamp: number }) => {
+    setFrameSrc(data.image);
+    setFrameTime(new Date(data.timestamp).toLocaleTimeString());
+  };
+
+  // Remove any existing listeners before adding to prevent stacking
+  socket.off('browser-frame');
+  socket.on('browser-frame', handleFrame);
+
+  return () => {
+    socket.off('browser-frame', handleFrame); // remove only THIS handler
+  };
+}, []);
 
   return (
     <div className="flex flex-col bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden h-full">

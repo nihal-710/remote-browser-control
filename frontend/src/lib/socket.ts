@@ -1,4 +1,3 @@
-
 import { io, Socket } from 'socket.io-client';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
@@ -17,6 +16,7 @@ export function getSocket(): Socket {
 
 export function disconnectSocket(): void {
   if (socket) {
+    socket.removeAllListeners(); // clean before disconnect
     socket.disconnect();
     socket = null;
   }

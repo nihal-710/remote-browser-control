@@ -2,27 +2,17 @@
 'use client';
 
 import { useSocket } from '../hooks/useSocket';
-import { BrowserStatus, SocketStatus } from '../types/browser';
 
-function Row({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {
+function Row({ label, value, accent }: { label: string; value: string; accent?: string }) {
   return (
-    <div className="flex items-center justify-between py-2 border-b border-white/[0.04] last:border-0">
-      <span className="text-xs text-zinc-500">{label}</span>
-      <span className={`text-xs text-zinc-300 max-w-[55%] truncate text-right ${mono ? 'font-mono' : ''}`}>{value}</span>
+    <div className="flex items-center justify-between py-1.5 border-b border-zinc-800 last:border-0">
+      <span className="text-xs text-zinc-500 shrink-0">{label}</span>
+      <span className={`text-xs font-mono truncate max-w-[58%] text-right ${accent || 'text-zinc-300'}`}>{value}</span>
     </div>
   );
 }
 
-const statusColor: Record<BrowserStatus, string> = {
-  idle: 'text-zinc-400', starting: 'text-yellow-400',
-  running: 'text-emerald-400', stopping: 'text-orange-400', error: 'text-red-400',
-};
-
-const socketColor: Record<SocketStatus, string> = {
-  connected: 'text-emerald-400', connecting: 'text-yellow-400', disconnected: 'text-red-400',
-};
-
-function formatUptime(s: number | null): string {
+function formatUptime(s: number | null) {
   if (s === null) return '—';
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
   if (h > 0) return `${h}h ${m}m ${sec}s`;
@@ -30,19 +20,29 @@ function formatUptime(s: number | null): string {
   return `${sec}s`;
 }
 
+const bColor: Record<string, string> = {
+  idle: 'text-zinc-400', starting: 'text-yellow-400',
+  running: 'text-emerald-400', stopping: 'text-orange-400', error: 'text-red-400',
+};
+const sColor: Record<string, string> = {
+  connected: 'text-emerald-400', connecting: 'text-yellow-400', disconnected: 'text-red-400',
+};
+
 export default function SessionInfo() {
-  const { browserStatus, socketStatus, currentUrl, uptime, startedAt, error } = useSocket();
+  const { browserStatus, socketStatus, currentUrl, pageTitle, uptime, startedAt, error } = useSocket();
+
   return (
-    <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-4">
-      <p className="text-xs font-medium text-zinc-500 uppercase tracking-widest mb-3">Session Info</p>
-      <Row label="Browser" value={<span className={`capitalize font-medium ${statusColor[browserStatus]}`}>{browserStatus}</span>} />
-      <Row label="Socket" value={<span className={`capitalize font-medium ${socketColor[socketStatus]}`}>{socketStatus}</span>} />
-      <Row label="Uptime" value={formatUptime(uptime)} mono />
-      <Row label="Started" value={startedAt ? new Date(startedAt).toLocaleTimeString() : '—'} mono />
-      <Row label="Current URL" value={currentUrl || '—'} mono />
+    <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
+      <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest mb-2.5">Session Info</p>
+      <Row label="Browser" value={browserStatus} accent={bColor[browserStatus]} />
+      <Row label="Socket" value={socketStatus} accent={sColor[socketStatus]} />
+      <Row label="Uptime" value={formatUptime(uptime)} />
+      <Row label="Started" value={startedAt ? new Date(startedAt).toLocaleTimeString() : '—'} />
+      {pageTitle && <Row label="Title" value={pageTitle} />}
+      <Row label="URL" value={currentUrl || '—'} />
       {error && (
-        <div className="mt-3 rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2">
-          <p className="text-xs text-red-400 break-words">{error}</p>
+        <div className="mt-2 p-2 rounded-md bg-red-950 border border-red-900">
+          <p className="text-[11px] text-red-400 break-all">{error}</p>
         </div>
       )}
     </div>

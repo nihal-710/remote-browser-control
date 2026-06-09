@@ -1,6 +1,5 @@
 
 export type BrowserStatus = 'idle' | 'starting' | 'running' | 'stopping' | 'error';
-
 export type SocketStatus = 'connected' | 'disconnected' | 'connecting';
 
 export interface BrowserState {
@@ -15,4 +14,9 @@ export interface SessionInfo {
   currentUrl: string;
   startedAt: Date | null;
   uptime: number | null;
+}
+
+export interface PageInfo {
+  url: string;
+  title: string;
 }
