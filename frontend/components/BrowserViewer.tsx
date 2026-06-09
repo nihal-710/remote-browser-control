@@ -14,11 +14,28 @@ interface RipplePoint {
 const BROWSER_WIDTH = 1280;
 const BROWSER_HEIGHT = 720;
 
+// Keys that should use page.keyboard.press() instead of page.keyboard.type()
+const SPECIAL_KEYS = new Set([
+  'Enter', 'Backspace', 'Tab', 'Escape', 'Delete',
+  'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+  'Home', 'End', 'PageUp', 'PageDown',
+  'F1','F2','F3','F4','F5','F6','F7','F8','F9','F10','F11','F12',
+]);
+
+// Keys to ignore entirely (modifiers on their own etc.)
+const IGNORED_KEYS = new Set([
+  'Shift', 'Control', 'Alt', 'Meta', 'CapsLock',
+  'NumLock', 'ScrollLock', 'Pause', 'Insert',
+  'ContextMenu', 'OS',
+]);
+
 export default function BrowserViewer() {
   const { browserStatus, loading } = useSocket();
   const [frameSrc, setFrameSrc] = useState<string>('');
   const [frameTime, setFrameTime] = useState<string>('');
   const [ripples, setRipples] = useState<RipplePoint[]>([]);
+  const [isFocused, setIsFocused] = useState(false);
+  const viewerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rippleCounter = useRef(0);
@@ -29,53 +46,78 @@ export default function BrowserViewer() {
   // Receive frames
   useEffect(() => {
     const socket = getSocket();
-
     socket.on('browser-frame', (data: { image: string; timestamp: number }) => {
       setFrameSrc(data.image);
       setFrameTime(new Date(data.timestamp).toLocaleTimeString());
     });
-
     return () => { socket.off('browser-frame'); };
   }, []);
 
-  // Clear frame on stop
+  // Clear on stop
   useEffect(() => {
-    if (!isRunning) { setFrameSrc(''); setFrameTime(''); setRipples([]); }
+    if (!isRunning) {
+      setFrameSrc('');
+      setFrameTime('');
+      setRipples([]);
+      setIsFocused(false);
+    }
   }, [isRunning]);
 
-  // Handle click on the stream
+  // ── Keyboard handler ────────────────────────────────────────
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!isRunning) return;
+
+    // Always prevent default to stop browser scroll/shortcuts
+    e.preventDefault();
+
+    if (IGNORED_KEYS.has(e.key)) return;
+
+    const socket = getSocket();
+
+    // Handle Ctrl+key shortcuts
+    if (e.ctrlKey && !IGNORED_KEYS.has(e.key)) {
+      const key = `Control+${e.key.toUpperCase()}`;
+      socket.emit('keyboard-input', { key });
+      return;
+    }
+
+    if (SPECIAL_KEYS.has(e.key)) {
+      // Special key: use press()
+      socket.emit('keyboard-input', { key: e.key });
+    } else if (e.key.length === 1) {
+      // Printable character: use type()
+      socket.emit('keyboard-input', { text: e.key });
+    }
+  }, [isRunning]);
+
+  // ── Click handler ───────────────────────────────────────────
   const handleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (!isRunning || !imgRef.current) return;
 
-    // Get the actual rendered image bounds (respects object-fit: contain)
-    const rect = imgRef.current.getBoundingClientRect();
+    // Focus the viewer for keyboard capture
+    viewerRef.current?.focus();
 
-    // Click position relative to the rendered image
+    const rect = imgRef.current.getBoundingClientRect();
     const relX = e.clientX - rect.left;
     const relY = e.clientY - rect.top;
 
-    // Ignore clicks outside the actual image area
     if (relX < 0 || relY < 0 || relX > rect.width || relY > rect.height) return;
 
-    // Scale to browser viewport coordinates
     const browserX = Math.round((relX / rect.width) * BROWSER_WIDTH);
     const browserY = Math.round((relY / rect.height) * BROWSER_HEIGHT);
 
-    // Emit to backend
-    const socket = getSocket();
-    socket.emit('mouse-click', { x: browserX, y: browserY, button: 'left' });
+    getSocket().emit('mouse-click', { x: browserX, y: browserY, button: 'left' });
 
-    // Show ripple at display coordinates (relative to container)
+    // Ripple
     const containerRect = containerRef.current?.getBoundingClientRect();
     if (containerRect) {
-      const rippleX = e.clientX - containerRect.left;
-      const rippleY = e.clientY - containerRect.top;
       const id = rippleCounter.current++;
-
-      setRipples(prev => [...prev, { x: rippleX, y: rippleY, id }]);
-      setTimeout(() => {
-        setRipples(prev => prev.filter(r => r.id !== id));
-      }, 600);
+      setRipples(prev => [...prev, {
+        x: e.clientX - containerRect.left,
+        y: e.clientY - containerRect.top,
+        id,
+      }]);
+      setTimeout(() => setRipples(prev => prev.filter(r => r.id !== id)), 600);
     }
   }, [isRunning]);
 
@@ -98,49 +140,75 @@ export default function BrowserViewer() {
             {isRunning ? 'chromium — live stream' : 'about:blank'}
           </span>
         </div>
-        {isRunning && (
-          <div className="flex items-center gap-1 shrink-0">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-[10px] text-emerald-400 font-medium">LIVE</span>
-          </div>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Keyboard focus indicator */}
+          {isRunning && isFocused && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-violet-500/15 border border-violet-500/30">
+              <svg className="w-2.5 h-2.5 text-violet-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="4" width="20" height="16" rx="2"/>
+                <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"/>
+              </svg>
+              <span className="text-[10px] text-violet-400 font-medium">KB Active</span>
+            </span>
+          )}
+          {isRunning && (
+            <div className="flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-[10px] text-emerald-400 font-medium">LIVE</span>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Viewport */}
+      {/* Viewport — focusable div captures keyboard */}
       <div
-        ref={containerRef}
-        className={`flex-1 relative bg-zinc-950 min-h-0 overflow-hidden ${isRunning && frameSrc ? 'cursor-pointer' : 'cursor-default'}`}
-        onClick={handleClick}
+        ref={viewerRef}
+        tabIndex={isRunning ? 0 : -1}
+        onKeyDown={handleKeyDown}
+        onFocus={() => setIsFocused(true)}
+        onBlur={() => setIsFocused(false)}
+        className={`flex-1 relative bg-zinc-950 min-h-0 overflow-hidden outline-none
+          ${isRunning && frameSrc ? 'cursor-pointer' : 'cursor-default'}
+          ${isFocused && isRunning ? 'ring-1 ring-inset ring-violet-500/40' : ''}
+        `}
       >
-        {/* Live stream image */}
-        {frameSrc && isRunning && (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img
-            ref={imgRef}
-            src={frameSrc}
-            alt="Browser stream"
-            style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', pointerEvents: 'none' }}
-          />
-        )}
+        {/* Inner container for click coordinate reference */}
+        <div ref={containerRef} className="absolute inset-0" onClick={handleClick}>
 
-        {/* Click ripple effects */}
-        {ripples.map(ripple => (
-          <div
-            key={ripple.id}
-            className="absolute pointer-events-none"
-            style={{ left: ripple.x, top: ripple.y, transform: 'translate(-50%, -50%)' }}
-          >
-            <div className="w-6 h-6 rounded-full border-2 border-violet-400 opacity-0 animate-ping" />
-            <div
-              className="absolute inset-0 m-auto w-2 h-2 rounded-full bg-violet-400/60"
-              style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}
+          {/* Live stream */}
+          {frameSrc && isRunning && (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              ref={imgRef}
+              src={frameSrc}
+              alt="Browser stream"
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'contain',
+                display: 'block',
+                pointerEvents: 'none',
+              }}
             />
-          </div>
-        ))}
+          )}
+
+          {/* Ripples */}
+          {ripples.map(r => (
+            <div
+              key={r.id}
+              className="absolute pointer-events-none"
+              style={{ left: r.x, top: r.y, transform: 'translate(-50%, -50%)' }}
+            >
+              <div className="w-6 h-6 rounded-full border-2 border-violet-400 animate-ping opacity-75" />
+              <div className="absolute w-2 h-2 rounded-full bg-violet-400/70"
+                style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }} />
+            </div>
+          ))}
+        </div>
 
         {/* Starting */}
         {isStarting && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-zinc-950">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-zinc-950 pointer-events-none">
             <div className="w-8 h-8 rounded-full border-2 border-violet-600 border-t-transparent animate-spin" />
             <p className="text-xs text-zinc-500">Launching Chromium...</p>
           </div>
@@ -148,7 +216,7 @@ export default function BrowserViewer() {
 
         {/* Waiting for first frame */}
         {isRunning && !frameSrc && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-zinc-950">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-zinc-950 pointer-events-none">
             <div className="w-6 h-6 rounded-full border-2 border-violet-600/50 border-t-violet-400 animate-spin" />
             <p className="text-xs text-zinc-600">Waiting for first frame...</p>
           </div>
@@ -156,7 +224,7 @@ export default function BrowserViewer() {
 
         {/* Empty state */}
         {!isRunning && !isStarting && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-zinc-950">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-zinc-950 pointer-events-none">
             <div className="w-12 h-12 rounded-xl bg-zinc-800 border border-zinc-700 flex items-center justify-center">
               <svg className="w-6 h-6 text-zinc-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="2" y="3" width="20" height="14" rx="2"/>
@@ -189,7 +257,9 @@ export default function BrowserViewer() {
       {isRunning && frameTime && (
         <div className="h-6 px-3 flex items-center justify-between bg-zinc-950 border-t border-zinc-800 shrink-0">
           <span className="text-[10px] text-zinc-600 font-mono">frame @ {frameTime}</span>
-          <span className="text-[10px] text-zinc-600">2 fps · JPEG · click enabled</span>
+          <span className="text-[10px] text-zinc-600">
+            {isFocused ? '⌨ keyboard active · ' : ''}2 fps · JPEG
+          </span>
         </div>
       )}
     </div>
