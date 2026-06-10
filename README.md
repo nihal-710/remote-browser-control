@@ -6,14 +6,6 @@ A full-stack remote browser control system — stream and interact with a headle
 
 ---
 
-## Demo
-
-| Start Browser | Live Stream | Click & Type |
-|---|---|---|
-| Click Start → Docker launches Chromium | Google streams to dashboard in real-time | Click any element, type, scroll |
-
----
-
 ## Features
 
 - **Live Browser Streaming** — Chromium screen streamed via Socket.io at 2fps (JPEG)
@@ -24,36 +16,52 @@ A full-stack remote browser control system — stream and interact with a headle
 - **Browser History** — Back, Forward, Refresh
 - **Page Info** — Live URL and page title tracking
 - **Docker Integration** — Chromium runs in an isolated container
-- **Professional UI** — Dark SaaS-style dashboard
+- **Professional UI** — Dark SaaS-style dashboard inspired by Browserbase / Railway
 
 ---
 
 ## Architecture
-┌─────────────────────────────────────────┐
-│           Browser (localhost:3000)       │
-│         Next.js 15 Dashboard            │
-│  Controls │ Viewer │ Session Info        │
-└──────────────────┬──────────────────────┘
-│ Socket.io
-│ (WebSocket)
-┌──────────────────▼──────────────────────┐
-│         Backend (localhost:3001)         │
-│      Node.js + Express + Socket.io       │
-│  BrowserManager │ socketHandler          │
-└──────────────────┬──────────────────────┘
-│ Playwright CDP
-│ (connectOverCDP)
-┌──────────────────▼──────────────────────┐
-│      Docker Container (port 9222)        │
-│         Chromium Headless                │
-│    --remote-debugging-port=9222          │
-└─────────────────────────────────────────┘
+┌─────────────────────────────────────┐
+│         Frontend  :3000             │
+│         Next.js 15 + TypeScript     │
+│  BrowserControls  │  BrowserViewer  │
+└──────────────┬──────────────────────┘
+│
+│  Socket.io (WebSocket)
+│  events: start-browser, browser-frame,
+│          mouse-click, keyboard-input,
+│          mouse-scroll, navigate-url
+│
+┌──────────────▼──────────────────────┐
+│         Backend  :3001              │
+│         Node.js + Express           │
+│  BrowserManager  │  socketHandler   │
+└──────────────┬──────────────────────┘
+│
+│  Playwright connectOverCDP()
+│  http://localhost:9222
+│
+┌──────────────▼──────────────────────┐
+│      Docker Container  :9222        │
+│      Chromium Headless              │
+│      --remote-debugging-port=9222   │
+└─────────────────────────────────────┘
 
-**Data flow for streaming:**
-Playwright → page.screenshot() → Base64 JPEG → Socket.io → img tag (React state)
+### Streaming Data Flow
+Playwright
+→ page.screenshot({ type: 'jpeg', quality: 60 })
+→ Buffer → Base64 string
+→ Socket.io emit('browser-frame')
+→ React setState(frameSrc)
+→ <img src={frameSrc} />
 
-**Data flow for clicks:**
-Mouse event → coordinate scaling → Socket.io → page.mouse.click(x, y)
+### Click Data Flow
+User clicks on <img>
+→ getBoundingClientRect() on img element
+→ scaleX = 1280 / renderedWidth
+→ scaleY = 720  / renderedHeight
+→ Socket.io emit('mouse-click', { x, y })
+→ page.mouse.click(x, y)
 
 ---
 
@@ -63,47 +71,50 @@ Mouse event → coordinate scaling → Socket.io → page.mouse.click(x, y)
 |---|---|
 | Frontend | Next.js 15, TypeScript, Tailwind CSS v4, Zustand |
 | Real-time | Socket.io (WebSocket) |
-| Backend | Node.js, Express, TypeScript |
+| Backend | Node.js, Express, TypeScript, ts-node |
 | Browser Automation | Playwright |
-| Container | Docker, Chromium |
+| Container | Docker, Chromium (Debian bookworm) |
 
 ---
 
 ## Folder Structure
 remote-browser-control/
-├── frontend/                  # Next.js 15 app
-│   ├── app/                   # App router pages
+├── frontend/
+│   ├── app/
+│   │   ├── page.tsx
+│   │   ├── layout.tsx
+│   │   └── globals.css
+│   └── src/
+│       ├── components/
+│       │   ├── BrowserControls.tsx
+│       │   ├── BrowserViewer.tsx
+│       │   ├── DashboardLayout.tsx
+│       │   ├── Navbar.tsx
+│       │   └── SessionInfo.tsx
+│       ├── hooks/
+│       │   └── useSocket.ts
+│       ├── lib/
+│       │   └── socket.ts
+│       ├── store/
+│       │   └── browserStore.ts
+│       └── types/
+│           └── browser.ts
+├── backend/
 │   ├── src/
-│   │   ├── components/        # UI components
-│   │   │   ├── BrowserControls.tsx
-│   │   │   ├── BrowserViewer.tsx
-│   │   │   ├── DashboardLayout.tsx
-│   │   │   ├── Navbar.tsx
-│   │   │   └── SessionInfo.tsx
-│   │   ├── hooks/
-│   │   │   └── useSocket.ts   # Socket.io hook
-│   │   ├── lib/
-│   │   │   └── socket.ts      # Socket singleton
-│   │   ├── store/
-│   │   │   └── browserStore.ts # Zustand state
-│   │   └── types/
-│   │       └── browser.ts
-├── backend/                   # Node.js server
-│   ├── src/
-│   │   ├── server.ts          # Express + Socket.io
+│   │   ├── server.ts
 │   │   ├── config/
 │   │   │   └── constants.ts
 │   │   ├── services/
-│   │   │   └── BrowserManager.ts  # Playwright singleton
+│   │   │   └── BrowserManager.ts
 │   │   ├── socket/
-│   │   │   └── socketHandler.ts   # Event handlers
+│   │   │   └── socketHandler.ts
 │   │   ├── types/
 │   │   │   └── browser.types.ts
 │   │   └── utils/
 │   │       └── logger.ts
 │   └── .env
 ├── docker/
-│   ├── Dockerfile             # Chromium container
+│   ├── Dockerfile
 │   └── docker-compose.yml
 ├── scripts/
 │   ├── start-docker.sh
@@ -130,52 +141,23 @@ cd remote-browser-control
 ### Install dependencies
 
 ```bash
-# Install all
-cd frontend && npm install && cd ../backend && npm install
+cd frontend && npm install
+cd ../backend && npm install
 ```
 
 ---
 
 ## Running Locally
 
-### Option A: Local Chromium (no Docker)
+### Option A — Local Chromium (no Docker)
 
-Make sure `USE_DOCKER=false` in `backend/.env`, then:
+Set `USE_DOCKER=false` in `backend/.env`, then:
 
-**Terminal 1 — Backend:**
 ```bash
-cd backend
-npm run dev
-```
-
-**Terminal 2 — Frontend:**
-```bash
-cd frontend
-npm run dev
-```
-
-Open **http://localhost:3000**
-
----
-
-### Option B: Docker (Chromium in container)
-
-**Step 1 — Start Chromium container:**
-```bash
-./scripts/start-docker.sh
-```
-
-**Step 2 — Enable Docker mode in backend/.env:**
-USE_DOCKER=true
-CDP_URL=http://localhost:9222
-
-**Step 3 — Start backend:**
-```bash
+# Terminal 1
 cd backend && npm run dev
-```
 
-**Step 4 — Start frontend:**
-```bash
+# Terminal 2
 cd frontend && npm run dev
 ```
 
@@ -183,116 +165,111 @@ Open **http://localhost:3000**
 
 ---
 
-## Docker Setup
-
-### Build and start container
+### Option B — Docker (Chromium in container)
 
 ```bash
-cd docker
-docker compose up -d --build
+# Step 1: Start Chromium container
+./scripts/start-docker.sh
+
+# Step 2: Enable Docker mode
+# In backend/.env set:
+#   USE_DOCKER=true
+#   CDP_URL=http://localhost:9222
+
+# Step 3: Start backend
+cd backend && npm run dev
+
+# Step 4: Start frontend
+cd frontend && npm run dev
 ```
 
-### Verify Chromium is running
-
-```bash
-curl http://localhost:9222/json/version
-```
-
-### Stop container
-
-```bash
-./scripts/stop-docker.sh
-```
-
-### View container logs
-
-```bash
-docker logs remote-browser-chromium -f
-```
+Open **http://localhost:3000**
 
 ---
 
-## Usage Guide
+## Docker Commands
 
-1. **Open** http://localhost:3000
-2. **Click Start** — Chromium launches (in Docker or locally)
-3. **Watch** the live stream appear in the viewer panel
-4. **Click** anywhere on the stream to interact
-5. **Type** after clicking an input field — "KB Active" badge confirms keyboard is active
-6. **Scroll** using mouse wheel inside the viewer
-7. **Navigate** using the URL bar or Back/Forward/Refresh buttons
-8. **Click Stop** to end the session
+```bash
+# Build and start
+cd docker && docker compose up -d --build
+
+# Verify Chromium is running
+curl http://localhost:9222/json/version
+
+# View logs
+docker logs remote-browser-chromium -f
+
+# Stop
+cd docker && docker compose down
+```
 
 ---
 
 ## Environment Variables
 
-**backend/.env**
+**`backend/.env`**
 
 | Variable | Default | Description |
 |---|---|---|
-| PORT | 3001 | Backend server port |
-| FRONTEND_URL | http://localhost:3000 | CORS origin |
-| SCREENSHOT_INTERVAL | 500 | ms between frames |
-| BROWSER_WIDTH | 1280 | Viewport width |
-| BROWSER_HEIGHT | 720 | Viewport height |
-| USE_DOCKER | false | Use Docker CDP mode |
-| CDP_URL | http://localhost:9222 | Docker Chromium endpoint |
-| CHROMIUM_PATH | /usr/bin/chromium-browser | Local Chromium path |
+| `PORT` | `3001` | Backend port |
+| `FRONTEND_URL` | `http://localhost:3000` | CORS origin |
+| `SCREENSHOT_INTERVAL` | `500` | ms between frames |
+| `BROWSER_WIDTH` | `1280` | Viewport width |
+| `BROWSER_HEIGHT` | `720` | Viewport height |
+| `USE_DOCKER` | `false` | Connect via CDP |
+| `CDP_URL` | `http://localhost:9222` | Chromium CDP endpoint |
+| `CHROMIUM_PATH` | `/usr/bin/chromium-browser` | Local binary path |
+
+---
+
+## Usage Guide
+
+1. Open **http://localhost:3000**
+2. Click **Start** — Chromium launches
+3. Google loads in the viewer panel
+4. **Click** anywhere on the stream to interact
+5. **Type** after clicking an input — "KB Active" badge confirms keyboard focus
+6. **Scroll** with mouse wheel inside the viewer
+7. Use the **URL bar** or **Back / Forward / Refresh** to navigate
+8. Click **Stop** to end the session
 
 ---
 
 ## Known Issues
 
-### 1. Stream synchronization lag after rapid navigation
+### Stream lag after rapid navigation
 
-**Description:** After multiple rapid back/forward/refresh actions in quick succession, the browser navigation state updates correctly (URL, title) while the streamed image may briefly lag 1–2 frames behind the actual page state.
+After multiple rapid back/forward/refresh actions, the streamed image may lag 1–2 frames behind the actual page state. Navigation state (URL, title) updates correctly.
 
-**Root cause:** The current streaming implementation uses a fixed-interval `setInterval` for screenshot capture. The interval runs independently of navigation events, so a screenshot taken mid-navigation may show a transitional state.
+**Root cause:** Fixed-interval `setInterval` screenshot polling runs independently of navigation events. A screenshot captured mid-navigation shows a transitional state.
 
-**Workaround:** The stream catches up within 500–1000ms automatically.
+**Workaround:** Stream catches up automatically within 500ms.
 
-**Future fix:** Replace interval-based polling with an event-driven approach — listen to Playwright's `page.on('load')` and emit a screenshot immediately on page load, eliminating the lag entirely.
-
-### 2. Docker CDP on WSL2
-
-Depending on WSL2 network configuration, `connectOverCDP` to `localhost:9222` may require the container to use `host` network mode. If connection fails, set `network_mode: host` in `docker-compose.yml`.
+**Future fix:** Listen to `page.on('load')` and emit a screenshot immediately on page load, eliminating interval lag entirely.
 
 ---
 
 ## Future Improvements
 
-- **Higher FPS streaming** — WebRTC or canvas-based streaming for 30fps+
-- **Multi-tab support** — manage multiple browser tabs
-- **Event-driven screenshots** — fire on page load instead of polling
-- **Authentication** — session tokens for multi-user access
-- **Mobile gesture support** — pinch-to-zoom, swipe
-- **Recording** — record and replay browser sessions
-- **Kubernetes deployment** — scale browser containers on demand
+- Event-driven screenshots on `page.on('load')` for zero lag
+- WebRTC / canvas streaming for 30fps video
+- Multi-tab support
+- Session recording and replay
+- Mobile gesture support (pinch, swipe)
+- Authentication and multi-user sessions
 
 ---
 
 ## Troubleshooting
 
-**Socket shows "Disconnected"**
-→ Make sure backend is running on port 3001: `cd backend && npm run dev`
-
-**"Failed to connect to backend"**
-→ Check CORS: `FRONTEND_URL` in `backend/.env` must match your frontend URL
-
-**Browser won't start in Docker mode**
-→ Run `curl http://localhost:9222/json/version` — if it fails, container isn't ready
-→ Check logs: `docker logs remote-browser-chromium`
-
-**Stream appears but clicks don't register**
-→ Click directly on the image area (not the sidebar)
-→ Check backend terminal for `mouse-click` log entries
-
-**Keyboard not working**
-→ Click inside the viewer first — "KB Active" badge must appear before typing
-
-**Scroll not working**
-→ Hover mouse over the viewer area and use mouse wheel
+| Problem | Fix |
+|---|---|
+| Socket shows "Disconnected" | Ensure backend is running: `cd backend && npm run dev` |
+| Browser won't start (Docker mode) | Run `curl http://localhost:9222/json/version` — if it fails, container isn't ready |
+| Clicks not registering | Click directly on the image area, not the sidebar |
+| Keyboard not working | Click inside the viewer first — "KB Active" badge must appear |
+| Scroll not working | Hover mouse over viewer and use mouse wheel |
+| Stream appears frozen | Hard refresh: `Ctrl+Shift+R` |
 
 ---
 
