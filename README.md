@@ -1,5 +1,12 @@
 # Remote Browser Control
 
+![Next.js](https://img.shields.io/badge/Next.js-15-black)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)
+![Node.js](https://img.shields.io/badge/Node.js-20-green)
+![Playwright](https://img.shields.io/badge/Playwright-Automation-orange)
+![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED)
+![Socket.io](https://img.shields.io/badge/Socket.io-Realtime-black)
+
 A full-stack remote browser control system — stream and interact with a headless Chromium browser running in Docker, directly from your web browser.
 
 > Built as an SDE internship assignment for BLD. Completed across 11 development phases in under 24 hours.
@@ -21,47 +28,44 @@ A full-stack remote browser control system — stream and interact with a headle
 ---
 
 ## Architecture
-┌─────────────────────────────────────┐
-│         Frontend  :3000             │
-│         Next.js 15 + TypeScript     │
-│  BrowserControls  │  BrowserViewer  │
-└──────────────┬──────────────────────┘
-│
-│  Socket.io (WebSocket)
-│  events: start-browser, browser-frame,
-│          mouse-click, keyboard-input,
-│          mouse-scroll, navigate-url
-│
-┌──────────────▼──────────────────────┐
-│         Backend  :3001              │
-│         Node.js + Express           │
-│  BrowserManager  │  socketHandler   │
-└──────────────┬──────────────────────┘
-│
-│  Playwright connectOverCDP()
-│  http://localhost:9222
-│
-┌──────────────▼──────────────────────┐
-│      Docker Container  :9222        │
-│      Chromium Headless              │
-│      --remote-debugging-port=9222   │
-└─────────────────────────────────────┘
+
+```mermaid
+flowchart TD
+    A[Frontend<br/>Next.js 15 + TypeScript<br/>Port 3000]
+    B[Socket.io<br/>WebSocket Communication]
+    C[Backend<br/>Node.js + Express<br/>Port 3001]
+    D[BrowserManager]
+    E[Playwright]
+    F[Chromium Docker Container<br/>Remote Debugging Port 9222]
+
+    A <--> B
+    B <--> C
+    C --> D
+    D --> E
+    E --> F
+```
 
 ### Streaming Data Flow
+
+```text
 Playwright
 → page.screenshot({ type: 'jpeg', quality: 60 })
 → Buffer → Base64 string
 → Socket.io emit('browser-frame')
 → React setState(frameSrc)
 → <img src={frameSrc} />
+```
 
 ### Click Data Flow
+
+```text
 User clicks on <img>
 → getBoundingClientRect() on img element
 → scaleX = 1280 / renderedWidth
 → scaleY = 720  / renderedHeight
 → Socket.io emit('mouse-click', { x, y })
 → page.mouse.click(x, y)
+```
 
 ---
 
@@ -78,6 +82,8 @@ User clicks on <img>
 ---
 
 ## Folder Structure
+
+```text
 remote-browser-control/
 ├── frontend/
 │   ├── app/
@@ -120,6 +126,7 @@ remote-browser-control/
 │   ├── start-docker.sh
 │   └── stop-docker.sh
 └── README.md
+```
 
 ---
 
