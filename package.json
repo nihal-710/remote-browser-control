@@ -5,6 +5,10 @@
   "scripts": {
     "dev:backend": "cd backend && npm run dev",
     "dev:frontend": "cd frontend && npm run dev",
-    "install:all": "cd frontend && npm install && cd ../backend && npm install"
+    "install:all": "cd frontend && npm install && cd ../backend && npm install",
+    "docker:start": "./scripts/start-docker.sh",
+    "docker:stop": "./scripts/stop-docker.sh",
+    "docker:logs": "cd docker && docker compose logs -f",
+    "docker:status": "docker ps --filter name=remote-browser-chromium"
   }
 }

@@ -1,0 +1,17 @@
+
+version: '3.8'
+
+services:
+  chromium:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: remote-browser-chromium
+    ports:
+      - "9222:9222"
+    restart: unless-stopped
+    shm_size: '256mb'
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      - DISPLAY=:0

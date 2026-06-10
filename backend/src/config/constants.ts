@@ -10,4 +10,6 @@ export const CONFIG = {
     HEIGHT: parseInt(process.env.BROWSER_HEIGHT || '720', 10),
     DEFAULT_URL: 'https://www.google.com',
   },
+  CDP_URL: process.env.CDP_URL || 'http://localhost:9222',
+  USE_DOCKER: process.env.USE_DOCKER === 'true',
 } as const;
